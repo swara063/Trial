@@ -11,7 +11,7 @@ def get_token_from_url():
         authorization_code = st.experimental_get_query_params()['code'][0]
         client_id = 155063  # Replace with your Strava app client ID
         client_secret = b37c50a0d719153af7cea2811c3405d4070d8616  # Replace with your Strava app client secret
-        redirect_uri = 98c34432cec6e69a2c097f9fbfbb72fcbf72bc55  # Replace with the redirect URI you set in Strava
+        redirect_uri = c31f870f81efbfd9a301a5c123841a44492a4759  # Replace with the redirect URI you set in Strava
         
         # Prepare the payload for token exchange
         token_url = 'https://www.strava.com/api/v3/oauth/token'
