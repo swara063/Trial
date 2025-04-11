@@ -8,7 +8,7 @@ import altair as alt
 st.set_page_config(page_title="Strava Health Dashboard 🚴‍♂️", layout="wide")
 
 # --- STRAVA ACCESS TOKEN ---
-ACCESS_TOKEN = "6f02320cca30a0c03302a35ab2fdd989c27c5471"
+ACCESS_TOKEN = "4a24c768b52facd939c63db33fc6218321a8f9c0"
 HEADERS = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
 
 # --- FETCH PROFILE ---
