@@ -1,114 +1,206 @@
 import streamlit as st
 import requests
+from datetime import datetime, timedelta
 import pandas as pd
-import matplotlib.pyplot as plt
-import base64
+import altair as alt
 
-# Function to get Strava token from URL parameters (OAuth)
-def get_token_from_url():
-    # Check if the OAuth authorization code exists in the URL
-    if 'code' in st.experimental_get_query_params():
-        authorization_code = st.experimental_get_query_params()['code'][0]
-        client_id = "155063"  # Replace with your Strava app client ID
-        client_secret = "b37c50a0d719153af7cea2811c3405d4070d8616"  # Replace with your Strava app client secret
-        redirect_uri = "http://localhost:8501"  # Replace with the redirect URI you set in Strava
-        
-        # Prepare the payload for token exchange
-        token_url = 'https://www.strava.com/api/v3/oauth/token'
-        payload = {
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'code': authorization_code,
-            'grant_type': 'authorization_code',
-            'redirect_uri': redirect_uri
-        }
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Strava Health Dashboard 🚴‍♂️", layout="wide")
 
-        # Make a POST request to exchange the authorization code for an access token
-        response = requests.post(token_url, data=payload)
-        
-        if response.status_code == 200:
-            token_data = response.json()
-            access_token = token_data.get('access_token')
-            refresh_token = token_data.get('refresh_token')
-            expires_at = token_data.get('expires_at')
-            return access_token, refresh_token, expires_at
-        else:
-            st.error('Failed to exchange code for token')
-            return None, None, None
-    return None, None, None
+# --- STRAVA ACCESS TOKEN ---
+ACCESS_TOKEN = "6f02320cca30a0c03302a35ab2fdd989c27c5471"
+HEADERS = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
 
-# Function to get Strava data
-def get_strava_data(access_token):
-    headers = {'Authorization': f'Bearer {access_token}'}
-    response = requests.get('https://www.strava.com/api/v3/athlete', headers=headers)
-    
-    if response.status_code == 200:
-        return response.json()  # Returns the JSON data from the API
-    else:
-        st.error('Failed to fetch data from Strava')
-        return None
+# --- FETCH PROFILE ---
+def fetch_profile():
+    response = requests.get("https://www.strava.com/api/v3/athlete", headers=HEADERS)
+    response.raise_for_status()
+    return response.json()
 
-# Function to get activity data
-def get_strava_activities(access_token):
-    activities_url = 'https://www.strava.com/api/v3/athlete/activities'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    params = {'per_page': 10}  # Get the most recent 10 activities
-    response = requests.get(activities_url, headers=headers, params=params)
-    
-    if response.status_code == 200:
-        return response.json()  # Returns activity data as a list of dictionaries
-    else:
-        st.error('Failed to fetch activities')
-        return None
+# --- FETCH ACTIVITIES ---
+def fetch_activities(per_page=50, pages=2):
+    all_activities = []
+    for page in range(1, pages + 1):
+        response = requests.get(
+            "https://www.strava.com/api/v3/athlete/activities",
+            headers=HEADERS,
+            params={"per_page": per_page, "page": page}
+        )
+        response.raise_for_status()
+        activities = response.json()
+        if not activities:
+            break
+        all_activities.extend(activities)
+    return all_activities
 
-# Streamlit interface for the app
-st.title('Strava Data Dashboard')
+# --- GET ATHLETE ZONES ---
+def fetch_zones():
+    response = requests.get("https://www.strava.com/api/v3/athlete/zones", headers=HEADERS)
+    response.raise_for_status()
+    return response.json()
 
-# Step 1: Check if the token is available
-access_token = st.session_state.get('access_token')
-if access_token is None:
-    st.write("You need to authenticate first.")
-    # Step 2: Show the authorization URL for OAuth
-    client_id = 'your_client_id_here'  # Replace with your Strava app client ID
-    redirect_uri = 'your_redirect_uri_here'  # Replace with the redirect URI
-    auth_url = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&scope=read&state=your_state_here"
-    st.markdown(f"Click [here to authenticate]( {auth_url} ).")
+# --- TITLE ---
+st.title("🚴‍♂️ Strava Health Dashboard")
+
+# --- FETCH DATA ---
+try:
+    with st.spinner("📡 Fetching profile..."):
+        profile = fetch_profile()
+
+    with st.spinner("📈 Fetching activities..."):
+        activities = fetch_activities()
+
+    with st.spinner("⚙️ Fetching zone data..."):
+        zones_data = fetch_zones()
+
+except Exception as e:
+    st.error(f"❌ Failed to fetch data: {e}")
+    st.stop()
+
+# --- DISPLAY PROFILE INFO ---
+st.subheader("🏅 Athlete Profile")
+
+cols = st.columns(3)
+cols[0].metric("Name", profile.get('firstname', '') + " " + profile.get('lastname', ''))
+cols[1].metric("City", profile.get('city', 'Unknown'))
+cols[2].metric("Followers", profile.get('follower_count', 0))
+
+# Handle profile image safely
+profile_url = profile.get('profile', '')
+if profile_url and profile_url.startswith("http"):
+    st.image(profile_url, width=100)
 else:
-    # Step 3: If access_token exists, allow user to fetch data
-    st.write("You are authenticated!")
+    st.info("No profile image available.")
 
-    # Button to fetch Strava data
-    if st.button('Load Athlete Data'):
-        athlete_data = get_strava_data(access_token)
-        
-        if athlete_data:
-            st.subheader('Athlete Information')
-            st.write(athlete_data)
+st.markdown(f"**Account Created:** {profile.get('created_at', 'N/A')}")
+st.markdown(f"**Country:** {profile.get('country', 'Unknown')}")
+st.markdown(f"**Measurement Preference:** {profile.get('measurement_preference', 'N/A')}")
 
-    # Display recent activities
-    st.subheader('Recent Activities')
-    activities = get_strava_activities(access_token)
+st.markdown("---")
 
-    if activities:
-        # Convert the activities data into a Pandas DataFrame for better visualization
-        activities_df = pd.DataFrame(activities)
-        st.write(activities_df[['name', 'distance', 'moving_time', 'type', 'start_date']])
+# --- ACTIVITY COUNT ---
+st.subheader("📊 Activity Summary")
+total_activities = len(activities)
+st.metric("Total Activities Fetched", total_activities)
 
-        # Plotting activity types
-        activity_types = activities_df['type'].value_counts()
-        st.bar_chart(activity_types)
+if not activities:
+    st.warning("No activities found.")
+    st.stop()
 
-        # Plotting distance of activities
-        plt.figure(figsize=(8, 4))
-        plt.bar(activities_df['name'], activities_df['distance'] / 1000)  # Convert distance to km
-        plt.title('Distance of Recent Activities (in km)')
-        plt.xlabel('Activity')
-        plt.ylabel('Distance (km)')
-        plt.xticks(rotation=45)
-        st.pyplot(plt)
+# --- LATEST ACTIVITY ---
+latest = activities[0]
+st.subheader("🚴 Latest Activity")
+st.markdown(f"**{latest.get('name', 'No name')}** on {latest.get('start_date_local', '')}")
 
-    # Save the access_token for future sessions (to avoid re-authentication)
-    st.session_state['access_token'] = access_token
+cols = st.columns(4)
+cols[0].metric("Distance (km)", round(latest.get('distance', 0) / 1000, 2))
+cols[1].metric("Time (min)", round(latest.get('moving_time', 0) / 60, 2))
+cols[2].metric("Speed (km/h)", round(latest.get('average_speed', 0) * 3.6, 2))
+cols[3].metric("Elevation (m)", latest.get('total_elevation_gain', 0))
 
-# Footer
-st.markdown('Made with ❤️ using Streamlit')
+# --- WEEKLY GOAL ---
+st.markdown("### 🎯 Weekly Goal Progress")
+
+week_ago = datetime.now() - timedelta(days=7)
+weekly_activities = []
+for act in activities:
+    try:
+        start_date = datetime.strptime(act['start_date_local'], "%Y-%m-%dT%H:%M:%S%z")
+        if start_date > week_ago:
+            weekly_activities.append(act)
+    except:
+        continue
+
+total_distance = sum(act.get('distance', 0) for act in weekly_activities) / 1000
+goal = 100
+progress = min(total_distance / goal, 1.0)
+
+st.progress(progress)
+st.markdown(f"**{total_distance:.2f} km** out of **{goal} km** this week")
+
+# --- RECENT ACTIVITIES TABLE ---
+st.markdown("### 📋 Recent Activities")
+
+activity_data = [{
+    "Name": act.get('name'),
+    "Distance (km)": round(act.get('distance', 0) / 1000, 2),
+    "Time (min)": round(act.get('moving_time', 0) / 60, 2),
+    "Speed (km/h)": round(act.get('average_speed', 0) * 3.6, 2),
+    "Date": act.get('start_date_local', '')
+} for act in activities[:10]]
+
+st.dataframe(activity_data)
+
+# --- POWER ZONE DISTRIBUTION ---
+st.markdown("---")
+st.subheader("⚡ Power Zone Distribution")
+
+power_zone = None
+if isinstance(zones_data, list):
+    for z in zones_data:
+        if isinstance(z, dict) and z.get("type") == "power":
+            power_zone = z
+            break
+
+if power_zone:
+    buckets = power_zone.get("distribution_buckets", [])
+
+    df_power = pd.DataFrame([
+        {
+            "Zone": f"{b['min']}-{b['max'] if b['max'] != -1 else '+'}",
+            "Time (sec)": b['time']
+        }
+        for b in buckets if b['time'] > 0
+    ])
+
+    chart = alt.Chart(df_power).mark_bar().encode(
+        x=alt.X("Zone:N", sort=None, title="Power Zone (Watts)"),
+        y=alt.Y("Time (sec):Q", title="Time Spent (sec)"),
+        tooltip=["Zone", "Time (sec)"]
+    ).properties(
+        width=700,
+        height=400,
+        title="Time Spent in Each Power Zone"
+    )
+
+    st.altair_chart(chart)
+else:
+    st.warning("No power zone data available.")
+
+# --- HEART RATE ZONES ---
+st.markdown("### ❤️ Heart Rate Zones")
+
+try:
+    if isinstance(zones_data, dict) and "heart_rate" in zones_data:
+        hr_zones = zones_data["heart_rate"]["zones"]
+
+        df_hr = pd.DataFrame([
+            {
+                "Zone": f"Z{i+1}",
+                "Min HR": z["min"],
+                "Max HR": z["max"] if z["max"] != -1 else None
+            }
+            for i, z in enumerate(hr_zones)
+        ])
+
+        chart_hr = alt.Chart(df_hr).mark_bar().encode(
+            x="Min HR:Q",
+            x2="Max HR:Q",
+            y=alt.Y("Zone:N", sort=None),
+            tooltip=["Zone", "Min HR", "Max HR"]
+        ).properties(
+            width=700,
+            height=300,
+            title="Heart Rate Zone Ranges"
+        )
+
+        st.altair_chart(chart_hr)
+    else:
+        st.warning("No heart rate zone data available.")
+
+except Exception as e:
+    st.error(f"Failed to process heart rate zones: {e}")
+
+# --- FOOTER ---
+st.markdown("---")
+st.caption("Built with ❤️ for Strava athletes.")
